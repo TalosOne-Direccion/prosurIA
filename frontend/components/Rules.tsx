@@ -45,7 +45,7 @@ export default function Rules() {
         {/* Botón para descargar bases */}
         <div className="mt-16 text-center">
           <a 
-            href="./public/Base_IA_Grupo_Prosur.pdf" 
+            href="./Base_IA_Grupo_Prosur.pdf" 
             download="Base_IA_Grupo_Prosur.pdf"
             className="inline-flex justify-center items-center px-8 py-3.5 border border-transparent text-base font-medium rounded-lg text-white bg-prosur-red hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-prosur-red shadow-md transition-all hover:scale-105"
           >
