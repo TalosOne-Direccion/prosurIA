@@ -40,7 +40,7 @@ export default function Footer() {
               alt="Logo Grupo Prosur" 
               width={225}
               height={225}
-              className="h-12 w-auto object-contain" 
+              className="h-24 w-auto object-contain" 
             />
           </div>
           <div className="text-center md:text-right">
