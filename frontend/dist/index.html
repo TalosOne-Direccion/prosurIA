@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reto de Inteligencia Artificial - Grupo Prosur</title>
+    <meta name="description" content="Participa en el Reto de Inteligencia Artificial para la Eficiencia Operativa de Grupo Prosur." />
+    
+    <!-- Favicon apuntando a la carpeta public -->
+    <link rel="icon" type="image/png" href="/assets/logoprosur-FBpx-mw4.png" />
+    
+    <!-- 
+      EXPLICACIÓN (5 líneas):
+      Esta solución implementa la landing page solicitada utilizando React y Tailwind CSS, cumpliendo con los lineamientos corporativos (#CC2027 y #8A8D8F).
+      Se estructuró en componentes reutilizables para garantizar escalabilidad, accesibilidad (ARIA, teclado) y diseño responsivo.
+      Los formularios incluyen validación nativa, manejo de estado para simular el envío sin recargar, y mensajes de retroalimentación claros.
+      Se respetaron estrictamente los textos, premios, reglas y fechas proporcionadas sin inventar datos adicionales.
+    -->
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              prosur: {
+                red: '#CC2027',
+                gray: '#8A8D8F',
+                bg: '#F9FAFB'
+              }
+            },
+            animation: {
+              'float': 'float 8s ease-in-out infinite',
+              'float-slow': 'float 12s ease-in-out infinite',
+              'float-fast': 'float 5s ease-in-out infinite',
+              'pulse-slow': 'pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            },
+            keyframes: {
+              float: {
+                '0%, 100%': { transform: 'translateY(0) translateX(0)' },
+                '33%': { transform: 'translateY(-20px) translateX(10px)' },
+                '66%': { transform: 'translateY(15px) translateX(-15px)' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+        <script type="module" crossorigin src="/assets/index-BWFUgaUC.js"></script>
+      </head>
+  <body class="bg-prosur-bg text-gray-800 font-sans antialiased selection:bg-prosur-red selection:text-white">
+    <div id="root"></div></body>
+</html>
