@@ -23,6 +23,7 @@ export default function RegistrationTabs() {
   // Form 2 State
   const [f2Data, setF2Data] = useState({
     teamName: '',
+    employeeId: '',
     projectName: '',
     diagnosis: '',
     solution: '',
@@ -30,31 +31,75 @@ export default function RegistrationTabs() {
   });
   const [f2Status, setF2Status] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
 
+  interface RegisteredTeam {
+    teamName: string;
+    employeeId: string;
+    company: string;
+    department: string;
+  }
+
   // Persistent registration state
-  const [registeredTeams, setRegisteredTeams] = useState<string[]>([]);
+  const [registeredTeams, setRegisteredTeams] = useState<RegisteredTeam[]>([]);
+  const [isLoadingTeams, setIsLoadingTeams] = useState(false);
   const [isManualTeam, setIsManualTeam] = useState(false);
 
-  // Load registered teams from localStorage on mount
-  useEffect(() => {
-    const teams = localStorage.getItem('prosur_registered_teams');
-    if (teams) {
-      try {
-        const parsed = JSON.parse(teams);
-        if (Array.isArray(parsed)) {
-          setRegisteredTeams(parsed);
+  // Load registered teams from Google Sheet (GET)
+  const fetchTeamsFromSheet = async () => {
+    setIsLoadingTeams(true);
+    try {
+      const response = await fetch(GOOGLE_SCRIPT_URL);
+      if (!response.ok) throw new Error("HTTP error " + response.status);
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        setRegisteredTeams(data);
+        if (data.length > 0 && !isManualTeam) {
+          setF2Data(prev => ({
+            ...prev,
+            teamName: data[0].teamName,
+            employeeId: data[0].employeeId
+          }));
         }
-      } catch (e) {
-        console.error("Error al cargar equipos de localStorage:", e);
       }
+    } catch (e) {
+      console.error("Error al obtener equipos de Google Sheet:", e);
+      // Fallback a localStorage
+      const teams = localStorage.getItem('prosur_registered_teams');
+      if (teams) {
+        try {
+          const parsed = JSON.parse(teams);
+          if (Array.isArray(parsed)) {
+            const mapped = parsed.map((name: string) => ({
+              teamName: name,
+              employeeId: '',
+              company: '',
+              department: ''
+            }));
+            setRegisteredTeams(mapped);
+            if (mapped.length > 0 && !isManualTeam) {
+              setF2Data(prev => ({
+                ...prev,
+                teamName: mapped[0].teamName,
+                employeeId: ''
+              }));
+            }
+          }
+        } catch (err) {}
+      }
+    } finally {
+      setIsLoadingTeams(false);
     }
+  };
+
+  useEffect(() => {
+    fetchTeamsFromSheet();
   }, []);
 
-  // Update default selected team when list of registered teams changes
+  // Fetch teams again whenever the active tab changes to 'alcance'
   useEffect(() => {
-    if (registeredTeams.length > 0 && !f2Data.teamName && !isManualTeam) {
-      setF2Data(prev => ({ ...prev, teamName: registeredTeams[0] }));
+    if (activeTab === 'alcance') {
+      fetchTeamsFromSheet();
     }
-  }, [registeredTeams, isManualTeam]);
+  }, [activeTab]);
 
   const successRef = useRef<HTMLDivElement>(null);
 
@@ -84,16 +129,40 @@ export default function RegistrationTabs() {
       });
 
       // Guardar el equipo registrado localmente
-      const updatedTeams = [...registeredTeams];
-      if (f1Data.teamName && !updatedTeams.includes(f1Data.teamName.trim())) {
-        const newTeam = f1Data.teamName.trim();
-        updatedTeams.push(newTeam);
-        localStorage.setItem('prosur_registered_teams', JSON.stringify(updatedTeams));
-        setRegisteredTeams(updatedTeams);
-        // Pre-seleccionar en Form 2
-        setF2Data(prev => ({ ...prev, teamName: newTeam }));
-        setIsManualTeam(false);
+      const newTeamObj: RegisteredTeam = {
+        teamName: f1Data.teamName.trim(),
+        employeeId: f1Data.employeeId.trim(),
+        company: f1Data.company,
+        department: f1Data.department
+      };
+      
+      const localTeamsString = localStorage.getItem('prosur_registered_teams');
+      let localTeamsList: string[] = [];
+      if (localTeamsString) {
+        try {
+          localTeamsList = JSON.parse(localTeamsString);
+        } catch (err) {}
       }
+      if (!localTeamsList.includes(newTeamObj.teamName)) {
+        localTeamsList.push(newTeamObj.teamName);
+        localStorage.setItem('prosur_registered_teams', JSON.stringify(localTeamsList));
+      }
+
+      setRegisteredTeams(prev => {
+        const exists = prev.some(t => t.teamName.toLowerCase() === newTeamObj.teamName.toLowerCase());
+        if (!exists) {
+          return [...prev, newTeamObj];
+        }
+        return prev;
+      });
+
+      // Pre-seleccionar en Form 2
+      setF2Data(prev => ({ 
+        ...prev, 
+        teamName: newTeamObj.teamName,
+        employeeId: newTeamObj.employeeId
+      }));
+      setIsManualTeam(false);
 
       setF1Status('success');
       setF1Data({ teamName: '', employeeId: '', company: '', department: '', members: '', painPoint: '' });
@@ -127,7 +196,8 @@ export default function RegistrationTabs() {
       setF2Status('success');
       // Limpiar datos pero conservar o resetear el equipo según selección
       setF2Data({ 
-        teamName: registeredTeams.length > 0 && !isManualTeam ? registeredTeams[0] : '', 
+        teamName: registeredTeams.length > 0 && !isManualTeam ? registeredTeams[0].teamName : '', 
+        employeeId: registeredTeams.length > 0 && !isManualTeam ? registeredTeams[0].employeeId : '', 
         projectName: '', 
         diagnosis: '', 
         solution: '', 
@@ -438,71 +508,119 @@ export default function RegistrationTabs() {
                   </div>
 
                   <div className="grid grid-cols-1 gap-6">
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <label htmlFor="teamName" className="block text-sm font-medium text-gray-700">
-                          Equipo participante <span className="text-prosur-red" aria-hidden="true">*</span>
-                        </label>
-                        {registeredTeams.length > 0 && isManualTeam && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsManualTeam(false);
-                              if (registeredTeams.length > 0) {
-                                setF2Data(prev => ({ ...prev, teamName: registeredTeams[0] }));
-                              }
-                            }}
-                            className="text-xs text-prosur-red hover:text-red-700 font-medium transition-colors"
-                          >
-                            Seleccionar de la lista
-                          </button>
+                    {/* Selector de equipo o ingreso manual */}
+                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                      <div className={registeredTeams.length > 0 && !isManualTeam ? "sm:col-span-2" : ""}>
+                        <div className="flex justify-between items-center mb-1">
+                          <label htmlFor="teamName" className="block text-sm font-medium text-gray-700">
+                            Equipo participante <span className="text-prosur-red" aria-hidden="true">*</span>
+                          </label>
+                          {registeredTeams.length > 0 && isManualTeam && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsManualTeam(false);
+                                if (registeredTeams.length > 0) {
+                                  setF2Data(prev => ({ 
+                                    ...prev, 
+                                    teamName: registeredTeams[0].teamName,
+                                    employeeId: registeredTeams[0].employeeId
+                                  }));
+                                }
+                              }}
+                              className="text-xs text-prosur-red hover:text-red-700 font-medium transition-colors"
+                            >
+                              Seleccionar de la lista
+                            </button>
+                          )}
+                        </div>
+                        
+                        {isLoadingTeams ? (
+                          <div className="flex items-center gap-2 p-3 bg-gray-50 border border-gray-200 rounded-md text-sm text-gray-500">
+                            <Loader2 className="animate-spin h-4 w-4 text-prosur-red" />
+                            Cargando lista de equipos desde Google Sheets...
+                          </div>
+                        ) : registeredTeams.length > 0 && !isManualTeam ? (
+                          <div className="relative">
+                            <select
+                              id="teamName"
+                              name="teamName"
+                              required
+                              value={f2Data.teamName}
+                              onChange={(e) => {
+                                if (e.target.value === '__manual__') {
+                                  setIsManualTeam(true);
+                                  setF2Data(prev => ({ ...prev, teamName: '', employeeId: '' }));
+                                } else {
+                                  const selected = registeredTeams.find(t => t.teamName === e.target.value);
+                                  setF2Data(prev => ({ 
+                                    ...prev, 
+                                    teamName: e.target.value,
+                                    employeeId: selected ? selected.employeeId : ''
+                                  }));
+                                }
+                              }}
+                              className={inputClasses}
+                              aria-required="true"
+                              disabled={f2Status === 'submitting'}
+                            >
+                              <option value="" disabled>Selecciona tu equipo</option>
+                              {registeredTeams.map((team) => (
+                                <option key={team.teamName} value={team.teamName}>
+                                  {team.teamName} (Colaborador: {team.employeeId || 'N/A'} - {team.department || 'Sin área'})
+                                </option>
+                              ))}
+                              <option value="__manual__">✏️ Escribir otro nombre de equipo...</option>
+                            </select>
+                          </div>
+                        ) : (
+                          <div>
+                            <input
+                              type="text"
+                              id="teamName"
+                              name="teamName"
+                              required
+                              value={f2Data.teamName}
+                              onChange={(e) => setF2Data(prev => ({ ...prev, teamName: e.target.value }))}
+                              className={inputClasses}
+                              placeholder="Ej. Los Innovadores"
+                              aria-required="true"
+                              disabled={f2Status === 'submitting'}
+                            />
+                          </div>
                         )}
                       </div>
-                      
-                      {registeredTeams.length > 0 && !isManualTeam ? (
-                        <div className="relative">
-                          <select
-                            id="teamName"
-                            name="teamName"
-                            required
-                            value={f2Data.teamName}
-                            onChange={(e) => {
-                              if (e.target.value === '__manual__') {
-                                setIsManualTeam(true);
-                                setF2Data(prev => ({ ...prev, teamName: '' }));
-                              } else {
-                                setF2Data(prev => ({ ...prev, teamName: e.target.value }));
-                              }
-                            }}
-                            className={inputClasses}
-                            aria-required="true"
-                            disabled={f2Status === 'submitting'}
-                          >
-                            <option value="" disabled>Selecciona tu equipo</option>
-                            {registeredTeams.map((team) => (
-                              <option key={team} value={team}>
-                                {team}
-                              </option>
-                            ))}
-                            <option value="__manual__">✏️ Escribir otro nombre de equipo...</option>
-                          </select>
-                        </div>
-                      ) : (
+
+                      {/* Campo para el número de colaborador */}
+                      {(!isLoadingTeams && (registeredTeams.length === 0 || isManualTeam)) ? (
                         <div>
+                          <label htmlFor="employeeId" className={labelClasses}>
+                            Número de colaborador <span className="text-prosur-red" aria-hidden="true">*</span>
+                          </label>
                           <input
                             type="text"
-                            id="teamName"
-                            name="teamName"
+                            id="employeeId"
+                            name="employeeId"
                             required
-                            value={f2Data.teamName}
-                            onChange={(e) => setF2Data(prev => ({ ...prev, teamName: e.target.value }))}
+                            value={f2Data.employeeId}
+                            onChange={(e) => setF2Data(prev => ({ ...prev, employeeId: e.target.value }))}
                             className={inputClasses}
-                            placeholder="Ej. Los Innovadores"
+                            placeholder="Ej. 12345"
                             aria-required="true"
                             disabled={f2Status === 'submitting'}
                           />
                         </div>
-                      )}
+                      ) : !isLoadingTeams && f2Data.teamName ? (
+                        <div className="sm:col-span-2 p-3 bg-gray-50/80 rounded-md border border-gray-200 flex justify-between items-center text-sm">
+                          <div>
+                            <span className="text-gray-500 font-medium">Vinculado a colaborador:</span>{' '}
+                            <span className="text-gray-950 font-semibold">{f2Data.employeeId || 'N/A'}</span>
+                          </div>
+                          <div className="text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded border border-green-200">
+                            Equipo verificado
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
 
                     <div>
