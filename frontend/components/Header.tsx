@@ -19,7 +19,7 @@ export default function Header() {
           <div className="flex-shrink-0 flex items-center">
             <a href="#" className="flex items-center focus:outline-none focus:ring-2 focus:ring-prosur-red rounded">
               <img 
-                src="./public/logoprosur.png" 
+                src="./logoprosur.png" 
                 alt="Logo Grupo Prosur" 
                 width={225}
                 height={225}
