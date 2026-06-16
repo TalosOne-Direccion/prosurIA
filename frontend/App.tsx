@@ -29,7 +29,7 @@ export default function App() {
         {/* Floating Logo */}
         <div className="absolute inset-0 flex items-center justify-center opacity-[0.03]">
           <img 
-            src="./public/logoprosur.png" 
+            src="./logoprosur.png" 
             alt="Logo Prosur Fondo" 
             width={225}
             height={225}
