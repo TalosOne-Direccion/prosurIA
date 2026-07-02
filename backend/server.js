@@ -323,6 +323,68 @@ app.post('/api-proxy', async (req, res) => {
   }
 });
 
+const ADMIN_ACCESS_CODE = process?.env?.ADMIN_ACCESS_CODE || "ProsurAdmin2026";
+
+function parseCSV(text) {
+  const result = [];
+  let row = [];
+  let currentVal = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+    
+    if (inQuotes) {
+      if (char === '"') {
+        if (nextChar === '"') {
+          currentVal += '"';
+          i++; // skip next quote
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        currentVal += char;
+      }
+    } else {
+      if (char === '"') {
+        inQuotes = true;
+      } else if (char === ',') {
+        row.push(currentVal);
+        currentVal = '';
+      } else if (char === '\r') {
+        // ignore
+      } else if (char === '\n') {
+        row.push(currentVal);
+        result.push(row);
+        row = [];
+        currentVal = '';
+      } else {
+        currentVal += char;
+      }
+    }
+  }
+  
+  if (row.length > 0 || currentVal) {
+    row.push(currentVal);
+    result.push(row);
+  }
+  
+  return result;
+}
+
+function serializeCSV(rows) {
+  return rows.map(row => {
+    return row.map(val => {
+      const stringVal = String(val);
+      if (stringVal.includes('"') || stringVal.includes(',') || stringVal.includes('\n') || stringVal.includes('\r')) {
+        return `"${stringVal.replace(/"/g, '""')}"`;
+      }
+      return stringVal;
+    }).join(',');
+  }).join('\n');
+}
+
 // --- Google Sheet Proxy Endpoint ---
 app.get('/sheet-proxy', async (req, res) => {
   try {
@@ -332,10 +394,42 @@ app.get('/sheet-proxy', async (req, res) => {
     if (!response.ok) throw new Error("HTTP error " + response.status);
     const csvText = await response.text();
     
+    // Check if the request includes a valid admin access token
+    const clientToken = req.query.token || req.headers['x-admin-token'];
+    const isAdmin = clientToken === ADMIN_ACCESS_CODE;
+    
+    let responseText = csvText;
+    
+    if (!isAdmin) {
+      console.log("[Node Proxy] Non-admin access, censoring sensitive columns...");
+      const parsedRows = parseCSV(csvText);
+      const headerIndex = parsedRows.findIndex(row => row[0] && row[0].toLowerCase().includes("nombre del equipo"));
+      
+      if (headerIndex !== -1) {
+        for (let i = headerIndex + 1; i < parsedRows.length; i++) {
+          const row = parsedRows[i];
+          if (!row[0] || !row[0].trim()) continue;
+          
+          // Censor sensitive fields only if they have content
+          if (row.length > 1 && row[1] && row[1].trim()) row[1] = '[Protegido]';
+          if (row.length > 4 && row[4] && row[4].trim()) row[4] = '[Protegido]';
+          if (row.length > 5 && row[5] && row[5].trim()) row[5] = '[Protegido por confidencialidad]';
+          if (row.length > 7 && row[7] && row[7].trim()) row[7] = '[Protegido por confidencialidad]';
+          if (row.length > 8 && row[8] && row[8].trim()) row[8] = '[Protegido por confidencialidad]';
+          if (row.length > 9 && row[9] && row[9].trim()) row[9] = '[Protegido por confidencialidad]';
+        }
+      }
+      responseText = serializeCSV(parsedRows);
+    } else {
+      console.log("[Node Proxy] Admin access granted, returning full CSV dataset");
+    }
+    
     // Enable CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Expose-Headers', 'X-Is-Admin');
+    res.setHeader('X-Is-Admin', isAdmin ? 'true' : 'false');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.send(csvText);
+    res.send(responseText);
   } catch (error) {
     console.error("[Node Proxy] Error proxying Google Sheet:", error);
     res.status(500).json({ error: error.message });

@@ -10,7 +10,9 @@ import {
   Building2, 
   Layers, 
   Lightbulb, 
-  TrendingUp 
+  TrendingUp,
+  Lock,
+  Unlock
 } from 'lucide-react';
 
 // =========================================================================
@@ -223,6 +225,13 @@ export default function RegistrationTabs() {
   const [isLoadingTeams, setIsLoadingTeams] = useState(false);
   const [isManualTeam, setIsManualTeam] = useState(false);
 
+  // Admin Mode State
+  const [adminToken, setAdminToken] = useState<string>(() => localStorage.getItem('prosur_admin_token') || '');
+  const [isAdminMode, setIsAdminMode] = useState<boolean>(false);
+  const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
+  const [inputCode, setInputCode] = useState<string>('');
+  const [adminError, setAdminError] = useState<string>('');
+
   // Search and Filter States for the registered projects dashboard
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCompany, setSelectedCompany] = useState('');
@@ -264,94 +273,153 @@ export default function RegistrationTabs() {
     }
   };
 
-  // Load registered teams and projects from Google Sheet CSV or fallback local proxy
-  const fetchTeamsAndProjects = async () => {
+  const processCsvData = (csvText: string) => {
+    const parsedRows = parseCSV(csvText);
+    
+    // Find header row by searching for "nombre del equipo"
+    const headerIndex = parsedRows.findIndex(row => row[0] && row[0].toLowerCase().includes("nombre del equipo"));
+    
+    if (headerIndex !== -1) {
+      const dataRows = parsedRows.slice(headerIndex + 1);
+      
+      const teams: RegisteredTeam[] = [];
+      const projects: RegisteredProject[] = [];
+      
+      dataRows.forEach(row => {
+        if (!row[0] || !row[0].trim()) return; // skip empty rows
+        
+        const teamName = row[0].trim();
+        const employeeId = (row[1] || '').trim();
+        const company = (row[2] || '').trim();
+        const department = (row[3] || '').trim();
+        const members = (row[4] || '').trim();
+        const painPoint = (row[5] || '').trim();
+        
+        teams.push({
+          teamName,
+          employeeId,
+          company,
+          department,
+          members,
+          painPoint
+        });
+        
+        const projectName = (row[6] || '').trim();
+        const diagnosis = (row[7] || '').trim();
+        const solution = (row[8] || '').trim();
+        const metric = (row[9] || '').trim();
+        
+        if (projectName) {
+          projects.push({
+            teamName,
+            employeeId,
+            projectName,
+            diagnosis,
+            solution,
+            metric
+          });
+        }
+      });
+      
+      setRegisteredTeams(teams);
+      setRegisteredProjects(projects);
+      
+      // Pre-select in Form 2
+      if (teams.length > 0 && !isManualTeam) {
+        setF2Data(prev => ({
+          ...prev,
+          teamName: prev.teamName || teams[0].teamName,
+          employeeId: prev.employeeId || teams[0].employeeId
+        }));
+      }
+    }
+  };
+
+  // Load registered teams and projects from Google Sheet CSV via fallback local proxy
+  const fetchTeamsAndProjects = async (tokenToUse?: string) => {
     setIsLoadingTeams(true);
     
     // Load local storage first
     loadFromLocalStorage();
 
+    const activeToken = tokenToUse !== undefined ? tokenToUse : adminToken;
+
     try {
       let csvText = '';
       
-      try {
-        // Try direct fetch first
-        const response = await fetch("https://docs.google.com/spreadsheets/d/1EtwmDT0nwUhMTXTPTQsHRdWWi-ehLgib3dBwpXUp0Nc/export?format=csv&gid=362040753");
-        if (response.ok) {
-          csvText = await response.text();
-        } else {
-          throw new Error("Direct fetch returned not OK");
+      // We always query through `/sheet-proxy` now, appending ?token= if present
+      const proxyUrl = activeToken ? `/sheet-proxy?token=${encodeURIComponent(activeToken)}` : '/sheet-proxy';
+      
+      const response = await fetch(proxyUrl);
+      if (!response.ok) throw new Error("Proxy fetch returned not OK");
+      
+      // Check X-Is-Admin header to confirm if admin access was granted
+      const isAdminHeader = response.headers.get('X-Is-Admin');
+      if (isAdminHeader === 'true') {
+        setIsAdminMode(true);
+        if (activeToken) {
+          localStorage.setItem('prosur_admin_token', activeToken);
         }
-      } catch (e) {
-        console.log("Direct spreadsheet fetch failed or CORS blocked. Trying local sheet proxy...");
-        const response = await fetch("/sheet-proxy");
-        if (!response.ok) throw new Error("Proxy fetch returned not OK");
-        csvText = await response.text();
+      } else {
+        setIsAdminMode(false);
+        if (tokenToUse !== undefined) {
+          localStorage.removeItem('prosur_admin_token');
+          setAdminToken('');
+        }
       }
 
+      csvText = await response.text();
+
       if (csvText) {
-        const parsedRows = parseCSV(csvText);
-        
-        // Find header row by searching for "nombre del equipo"
-        const headerIndex = parsedRows.findIndex(row => row[0] && row[0].toLowerCase().includes("nombre del equipo"));
-        
-        if (headerIndex !== -1) {
-          const dataRows = parsedRows.slice(headerIndex + 1);
-          
-          const teams: RegisteredTeam[] = [];
-          const projects: RegisteredProject[] = [];
-          
-          dataRows.forEach(row => {
-            if (!row[0] || !row[0].trim()) return; // skip empty rows
-            
-            const teamName = row[0].trim();
-            const employeeId = (row[1] || '').trim();
-            const company = (row[2] || '').trim();
-            const department = (row[3] || '').trim();
-            const members = (row[4] || '').trim();
-            const painPoint = (row[5] || '').trim();
-            
-            teams.push({
-              teamName,
-              employeeId,
-              company,
-              department,
-              members,
-              painPoint
-            });
-            
-            const projectName = (row[6] || '').trim();
-            const diagnosis = (row[7] || '').trim();
-            const solution = (row[8] || '').trim();
-            const metric = (row[9] || '').trim();
-            
-            if (projectName) {
-              projects.push({
-                teamName,
-                employeeId,
-                projectName,
-                diagnosis,
-                solution,
-                metric
-              });
-            }
-          });
-          
-          setRegisteredTeams(teams);
-          setRegisteredProjects(projects);
-          
-          // Pre-select in Form 2
-          if (teams.length > 0 && !isManualTeam) {
-            setF2Data(prev => ({
-              ...prev,
-              teamName: prev.teamName || teams[0].teamName,
-              employeeId: prev.employeeId || teams[0].employeeId
-            }));
-          }
-        }
+        processCsvData(csvText);
       }
     } catch (e) {
       console.error("Error al obtener datos reales de Google Sheet:", e);
+    } finally {
+      setIsLoadingTeams(false);
+    }
+  };
+
+  const handleAdminLogout = () => {
+    localStorage.removeItem('prosur_admin_token');
+    setAdminToken('');
+    setIsAdminMode(false);
+    // Reload projects in public view
+    fetchTeamsAndProjects('');
+  };
+
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminError('');
+    if (!inputCode.trim()) {
+      setAdminError('Por favor ingresa un código.');
+      return;
+    }
+    
+    setIsLoadingTeams(true);
+    try {
+      const activeToken = inputCode.trim();
+      const proxyUrl = activeToken ? `/sheet-proxy?token=${encodeURIComponent(activeToken)}` : '/sheet-proxy';
+      const response = await fetch(proxyUrl);
+      if (!response.ok) throw new Error("Error de red al consultar el servidor.");
+      
+      const isAdminHeader = response.headers.get('X-Is-Admin');
+      if (isAdminHeader === 'true') {
+        setAdminToken(activeToken);
+        setIsAdminMode(true);
+        localStorage.setItem('prosur_admin_token', activeToken);
+        setShowAdminModal(false);
+        setInputCode('');
+        
+        const csvText = await response.text();
+        if (csvText) {
+          processCsvData(csvText);
+        }
+      } else {
+        setAdminError('Código de acceso incorrecto.');
+      }
+    } catch (err: any) {
+      setAdminError(err.message || 'Error de conexión con el servidor.');
     } finally {
       setIsLoadingTeams(false);
     }
@@ -612,6 +680,37 @@ export default function RegistrationTabs() {
     setActiveTab(tab);
     setF1Status('idle');
     setF2Status('idle');
+  };
+
+  const renderConfidentialField = (title: string, value: string | undefined, icon: React.ReactNode) => {
+    const textVal = value || '';
+    const isProtected = textVal === '[Protegido]' || textVal === '[Protegido por confidencialidad]' || textVal.toLowerCase().includes('protegido');
+    
+    return (
+      <div>
+        <h4 className="text-sm font-bold text-gray-800 uppercase tracking-wider mb-2 flex items-center gap-1.5 border-b pb-1 border-gray-100">
+          {icon}
+          {title}
+        </h4>
+        {isProtected ? (
+          <div className="relative overflow-hidden bg-gray-50/50 border border-gray-250/60 rounded-xl p-4 flex items-center justify-between gap-4">
+            <div className="flex-1 filter blur-[2.5px] select-none text-xs text-gray-300 font-mono leading-relaxed select-none pointer-events-none">
+              Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam.
+            </div>
+            <div className="absolute inset-0 bg-white/30 flex items-center justify-center">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-white text-gray-600 border border-gray-200 shadow-sm animate-pulse">
+                <Lock className="w-3.5 h-3.5 text-gray-500" />
+                Protegido por confidencialidad
+              </span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line bg-gray-50/30 p-4 rounded-xl border border-gray-250/40">
+            {textVal}
+          </p>
+        )}
+      </div>
+    );
   };
 
   const inputClasses = "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-prosur-red focus:ring-prosur-red sm:text-sm p-3 border bg-white/90 transition-colors";
@@ -1166,6 +1265,50 @@ export default function RegistrationTabs() {
               aria-labelledby="tab-proyectos"
               hidden={activeTab !== 'proyectos'}
             >
+              {/* Admin Mode Warning/Action Banner */}
+              {isAdminMode ? (
+                <div className="bg-green-50/80 rounded-xl p-4 border border-green-200/60 mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-green-500/10 rounded-lg text-green-600">
+                      <Unlock className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-green-800">Modo Administrador Activo</p>
+                      <p className="text-xs text-green-600 font-medium">Tienes acceso para ver todos los detalles y desgloses de los proyectos.</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={handleAdminLogout}
+                    className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-green-400"
+                  >
+                    Cerrar Sesión Admin
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-gray-50/80 rounded-xl p-4 border border-gray-200/60 mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-gray-500/10 rounded-lg text-gray-500">
+                      <Lock className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-gray-700">Vista Pública Activa</p>
+                      <p className="text-xs text-gray-500 font-medium">Las propuestas de ideas y desgloses están protegidos para evitar plagios entre equipos.</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setAdminError('');
+                      setInputCode('');
+                      setShowAdminModal(true);
+                    }}
+                    className="px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 text-xs font-semibold rounded-lg transition-colors focus:outline-none flex items-center gap-1.5 shadow-xs"
+                  >
+                    <Unlock className="w-3.5 h-3.5 text-gray-500" />
+                    Acceso Organizador
+                  </button>
+                </div>
+              )}
+
               {/* Metrics Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
                 <div className="bg-gradient-to-br from-red-50 to-white p-4 rounded-xl border border-red-100/60 flex items-center gap-3.5 shadow-sm hover:shadow-md transition-shadow">
@@ -1357,7 +1500,10 @@ export default function RegistrationTabs() {
                         {selectedReg.projectName || 'Registro de Equipo'}
                       </h3>
                       <p className="text-sm text-prosur-gray mt-1 font-medium">
-                        Presentado por el equipo <strong className="text-gray-800 font-semibold">{selectedReg.teamName}</strong> (Colaborador ID: {selectedReg.employeeId || 'N/A'})
+                        Presentado por el equipo <strong className="text-gray-800 font-semibold">{selectedReg.teamName}</strong>
+                        {selectedReg.employeeId && selectedReg.employeeId !== '[Protegido]' && (
+                          <> (Colaborador ID: {selectedReg.employeeId})</>
+                        )}
                       </p>
                     </div>
 
@@ -1369,41 +1515,35 @@ export default function RegistrationTabs() {
                         </div>
                         <div>
                           <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">Integrantes del Equipo</p>
-                          <p className="text-sm text-gray-850 font-semibold mt-0.5 whitespace-pre-line">{selectedReg.members || 'No especificados'}</p>
+                          {selectedReg.members === '[Protegido]' ? (
+                            <span className="inline-flex items-center gap-1.5 mt-1 text-xs font-semibold text-gray-500 bg-white px-2.5 py-1 rounded-lg border border-gray-200/80 shadow-xs animate-pulse">
+                              <Lock className="w-3 h-3 text-gray-400" /> Protegido
+                            </span>
+                          ) : (
+                            <p className="text-sm text-gray-855 font-semibold mt-0.5 whitespace-pre-line">{selectedReg.members || 'No especificados'}</p>
+                          )}
                         </div>
                       </div>
 
-                      <div>
-                        <h4 className="text-sm font-bold text-gray-800 uppercase tracking-wider mb-2.5 flex items-center gap-1.5 border-b pb-1 border-gray-100">
-                          <AlertCircle className="w-4 h-4 text-prosur-red" />
-                          Situación Actual / El Problema
-                        </h4>
-                        <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line bg-red-50/10 p-3 rounded-lg border border-red-500/5">
-                          {selectedReg.diagnosis || selectedReg.painPoint || 'Sin descripción detallada del problema.'}
-                        </p>
-                      </div>
+                      {renderConfidentialField(
+                        "Situación Actual / El Problema",
+                        selectedReg.diagnosis || selectedReg.painPoint || 'Sin descripción detallada del problema.',
+                        <AlertCircle className="w-4 h-4 text-prosur-red" />
+                      )}
 
                       {selectedReg.status === 'scope_submitted' && (
                         <>
-                          <div>
-                            <h4 className="text-sm font-bold text-gray-800 uppercase tracking-wider mb-2.5 flex items-center gap-1.5 border-b pb-1 border-gray-100">
-                              <Lightbulb className="w-4 h-4 text-blue-500" />
-                              La Solución Propuesta (Inteligencia Artificial)
-                            </h4>
-                            <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line bg-blue-50/10 p-3 rounded-lg border border-blue-500/5">
-                              {selectedReg.solution}
-                            </p>
-                          </div>
+                          {renderConfidentialField(
+                            "La Solución Propuesta (Inteligencia Artificial)",
+                            selectedReg.solution,
+                            <Lightbulb className="w-4 h-4 text-blue-500" />
+                          )}
 
-                          <div>
-                            <h4 className="text-sm font-bold text-gray-800 uppercase tracking-wider mb-2.5 flex items-center gap-1.5 border-b pb-1 border-gray-100">
-                              <TrendingUp className="w-4 h-4 text-green-500" />
-                              Métrica de Éxito
-                            </h4>
-                            <p className="text-sm text-gray-600 leading-relaxed bg-green-50/10 p-3 rounded-lg border border-green-500/5">
-                              {selectedReg.metric}
-                            </p>
-                          </div>
+                          {renderConfidentialField(
+                            "Métrica de Éxito",
+                            selectedReg.metric,
+                            <TrendingUp className="w-4 h-4 text-green-500" />
+                          )}
                         </>
                       )}
 
@@ -1428,6 +1568,68 @@ export default function RegistrationTabs() {
                         Cerrar
                       </button>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Admin Login Modal */}
+              {showAdminModal && (
+                <div 
+                  className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs transition-opacity"
+                  role="dialog"
+                  aria-modal="true"
+                  onClick={() => setShowAdminModal(false)}
+                >
+                  <div 
+                    className="relative bg-white rounded-2xl max-w-md w-full shadow-2xl border border-gray-100 p-6 sm:p-8 animate-in fade-in zoom-in-95 duration-200"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={() => setShowAdminModal(false)}
+                      className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-1.5 rounded-full hover:bg-gray-100 transition-colors"
+                      aria-label="Cerrar modal"
+                    >
+                      <X className="w-5.5 h-5.5" />
+                    </button>
+
+                    <div className="mb-6 text-center">
+                      <div className="mx-auto w-12 h-12 bg-red-50 rounded-full flex items-center justify-center text-prosur-red mb-3">
+                        <Lock className="w-6 h-6" />
+                      </div>
+                      <h3 className="text-xl font-bold text-gray-900 leading-tight">
+                        Acceso Organizador
+                      </h3>
+                      <p className="text-sm text-prosur-gray mt-1 font-medium">
+                        Ingresa el código de administrador para revelar las ideas completas de todos los equipos.
+                      </p>
+                    </div>
+
+                    <form onSubmit={handleAdminLogin} className="space-y-4">
+                      {adminError && (
+                        <div className="p-3 bg-red-50 text-xs font-semibold text-red-600 border border-red-200 rounded-lg">
+                          {adminError}
+                        </div>
+                      )}
+                      <div>
+                        <label htmlFor="adminCode" className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Código de Acceso</label>
+                        <input
+                          type="password"
+                          id="adminCode"
+                          required
+                          value={inputCode}
+                          onChange={(e) => setInputCode(e.target.value)}
+                          placeholder="••••••••"
+                          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-prosur-red text-center text-lg font-bold tracking-widest"
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={isLoadingTeams}
+                        className="w-full py-2.5 px-4 bg-prosur-red hover:bg-red-700 text-white font-semibold rounded-lg shadow-sm transition-all focus:outline-none hover:scale-[1.01] active:scale-[0.99] disabled:opacity-70 disabled:hover:scale-100"
+                      >
+                        {isLoadingTeams ? 'Verificando...' : 'Desbloquear Datos'}
+                      </button>
+                    </form>
                   </div>
                 </div>
               )}
